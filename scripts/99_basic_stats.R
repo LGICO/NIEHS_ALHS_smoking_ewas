@@ -1,5 +1,5 @@
-ss <- fread('~/OneDrive - National Institutes of Health/NHLBI/NIEHS_ahs/data/LHS_Sample_Sheet.csv')
-load('~/OneDrive - National Institutes of Health/NHLBI/NIEHS_ahs/output/mini_764.rdata')
+ss <- fread('samplesheets/LHS_Sample_Sheet.csv')
+load('751_clean_pc.rdata')
 
 table(ss$LH_smoke_status)
 table(ss$LH_smoke_status)/887*100

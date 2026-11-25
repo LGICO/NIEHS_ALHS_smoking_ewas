@@ -1,0 +1,78 @@
+## Check assembly should be hg19
+bcftools view -h genotype/alhs.vcf  | grep -Ei 'reference|assembly|contig'
+
+##check to see if annotated with rsids
+bcftools query -f '%ID\n' genotype/alhs.vcf |
+  grep -E '^rs[0-9]+$' |
+  sort -u |
+  wc -l
+bcftools view -h genotype/alhs.vcf |
+  grep '^##INFO'
+bcftools query -f '%CHROM\t%POS\t%ID\t%INFO\n' genotype/alhs.vcf |
+  head -20
+bcftools query -f '%INFO/DBSNP_RS_ID\n' genotype/alhs.vcf |
+  grep -E '^rs[0-9]+$' |
+  sort -u |
+  wc -l
+  
+Rscript scripts/extract_msa_idat_calls.R \
+  samplesheets/LHS_Sample_Sheet.csv \
+  input_idats \
+  msa_results \
+  Sample_ID \
+  Gender \
+  hg38
+  
+python3 scripts/compare_msa_axiom.py \
+  --axiom-vcf genotype/alhs.vcf \
+  --msa-results msa_results/msa_sex_qc.tsv \
+  --msa-sample-sheet samplesheets/LHS_Sample_Sheet.csv \
+  --bridge-file linkage_IDs_msa.txt \
+  --fallback-sample-file samplesheets/missing_ev.csv \
+  --output-dir identity_results_filtered095 \
+  --match-mode rsid \
+  --variant-allowlist identity_results/identity_snps_095.txt \
+  --match-threshold 0.95 \
+  --min-sites 50 \
+  --min-margin 0.10
+  
+awk -F '\t' '
+  NR == 1 {print "header columns:", NF}
+  NR > 1 && NF != 19 {bad++}
+  END {
+    print "sample rows:", NR-1
+    print "malformed rows:", bad+0
+  }
+' identity_results_filtered095/best_matches.tsv
+
+# All 93 non-PASS samples
+awk -F '\t' 'BEGIN {OFS=FS} NR==1 || $17!="PASS"' \
+  identity_results_filtered095/best_matches.tsv \
+  > identity_results_filtered095/all_bad_samples.tsv
+  
+awk -F '\t' '
+  BEGIN {OFS=FS}
+
+  NR==FNR {
+    line=$0
+    while (match(line, /"[^"]+"/)) {
+      id=substr(line, RSTART+1, RLENGTH-2)
+      gsub(/_DNA_/, "-DNA_", id)
+      wanted[id]=1
+      line=substr(line, RSTART+RLENGTH)
+    }
+    next
+  }
+
+  FNR==1 {print; next}
+
+  {
+    id=$1
+    gsub(/_DNA_/, "-DNA_", id)
+  }
+
+  $17!="PASS" && (id in wanted) {print}
+' sample_list.txt \
+  identity_results_filtered095/best_matches.tsv \
+  > identity_results_filtered095/overlapping_bad_samples.tsv
+  

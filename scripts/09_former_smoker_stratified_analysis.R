@@ -1,7 +1,11 @@
 library(dplyr)
-load('/output/rdata/cleaned_MSA_niehs_alhs.rdata')
-beta2 = t(clean_betas) # methylation data
-pheno = clean_sampsheet
+load('751_clean_pc.rdata')
+dir.create("output/former_stratified", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/five_year", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/ten_year", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/continuous", recursive=TRUE, showWarnings=FALSE)
+#beta2 = t(clean_betas) # methylation data
+
 ### EWAS
 library(survey)
 library(MASS)
@@ -19,7 +23,16 @@ clusterEvalQ(cl,library(survey))
 
 
 ################################
-##prepare data
+##pc only
+#pheno=pheno%>%mutate(asthma_weights=ifelse(LHSSCREEN_12142015=="Case",w_asthma,w_nonasthma))
+#pheno = pheno %>% filter(Gender == inrdsx)
+new_pheno <- data.table::fread('samplesheets/lhs28901_Methylation_Phenotype_2025APR29.txt',sep=',')
+np<-new_pheno%>% filter(LHID %in% pheno$LHID,COMMENT!='Replicate')
+x<-colnames(np)[!colnames(np) %in% colnames(pheno)]
+np <- np %>% dplyr::select(LHID,partid, x)
+pheno <- left_join(pheno,np,by=c('LHID','partid'))
+pheno=pheno%>%mutate(LEL19=ifelse(LEL19=="Yes",1,ifelse(LEL19=="No",0,99)))
+pheno$LEL19=as.factor(pheno$LEL19)
 
 pheno=pheno%>%mutate(LH_smoke_status=case_when(LH_smoke_status=="Never"~0,
                                                LH_smoke_status=="Former"~1,
@@ -60,6 +73,7 @@ pheno <- pheno %>% mutate(former_5yrs_split = case_when(LH_smoke_status == 0 ~ f
                                              LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 10 & LH_TimeSinceSmked_v1 <= 15 ~ factor(4),
                                              LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 15 ~ factor(5),
                                              LH_smoke_status == 99 ~ factor(99)))
+pheno$former_5yrs_split <- factor(pheno$former_5yrs_split, levels = c(0,1,2,3,4,5,99))
 pheno <- pheno %>% mutate(former_10yrs_split = case_when(LH_smoke_status == 0 ~ factor(0),
                                                        LH_smoke_status == 2 ~ factor(1),
                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 <= 10 ~ factor(2),
@@ -67,8 +81,9 @@ pheno <- pheno %>% mutate(former_10yrs_split = case_when(LH_smoke_status == 0 ~ 
                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 20 & LH_TimeSinceSmked_v1 <= 30 ~ factor(4),
                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 30 ~ factor(5),
                                                        LH_smoke_status == 99 ~ factor(99)))
+pheno$former_10yrs_split <- factor(pheno$former_10yrs_split, levels = c(0,1,2,3,4,5,99))
 ##need to keep never smokers
-
+betap <- t(betas_miss_masked)
 pheno_pc <- pheno %>% filter(European == 1,!is.na(PC1))
 beta_pc <- beta2[row.names(beta2) %in% pheno_pc$Sample_ID,]
 betap_pc <- betap[row.names(betap) %in% pheno_pc$Sample_ID,]
@@ -84,6 +99,8 @@ pheno_former <- pheno %>% filter(LH_smoke_status==1)
 beta_former <- beta2[row.names(beta2) %in% pheno_former$Sample_ID,]
 pheno_formerpc <- pheno %>% filter(LH_smoke_status==1,European == 1,!is.na(PC1))
 beta_formerpc <- beta2[row.names(beta2) %in% pheno_formerpc$Sample_ID,]
+betap_former <- betap[row.names(betap) %in% pheno_former$Sample_ID,]
+betap_formerpc <- betap[row.names(betap) %in% pheno_formerpc$Sample_ID,]
 #######################################################################################
 ##########
 ##Model 1 unweighted euro
@@ -92,7 +109,7 @@ beta_formerpc <- beta2[row.names(beta2) %in% pheno_formerpc$Sample_ID,]
 ## smoke_3 3
 ## smoke_4 4
 ## smoke_99 5
-system('mkdir -p output/former_strat')
+
 ##########
 ##Model 1 unweighted euro
 f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
@@ -112,10 +129,10 @@ f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc)
+results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model1_unweighted.3.csv")
+write.csv(results, "output/former_stratified/model1_unweighted.3.csv")
 
 f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   dat <- svydesign(id = ~Sample_ID, data = data.frame(y = meth, dat1))
@@ -134,10 +151,10 @@ f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc)
+results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model1_unweighted.4.csv")
+write.csv(results, "output/former_stratified/model1_unweighted.4.csv")
 ##########
 ##Model 10
 f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
@@ -157,10 +174,10 @@ f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.unwgt, pheno)
+results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.unwgt, pheno)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model10_unweighted.3.csv")
+write.csv(results, "output/former_stratified/model10_unweighted.3.csv")
 ##########
 ##Model 10
 f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
@@ -180,10 +197,10 @@ f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.unwgt, pheno)
+results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.unwgt, pheno)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model10_unweighted.4.csv")
+write.csv(results, "output/former_stratified/model10_unweighted.4.csv")
 
 
 ##########################################################################################################################
@@ -223,10 +240,10 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc)
+results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model3_weighted.3.csv")
+write.csv(results, "output/former_stratified/model3_weighted.3.csv")
 
 ###########
 ## Model 3
@@ -247,10 +264,10 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc)
+results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model3_weighted.4.csv")
+write.csv(results, "output/former_stratified/model3_weighted.4.csv")
 
 ##############################
 ##Model 12
@@ -280,10 +297,10 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.wgt, pheno)
+results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.wgt, pheno)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model12_weighted.3.csv")
+write.csv(results, "output/former_stratified/model12_weighted.3.csv")
 
 f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   dat <- svydesign(id = ~Sample_ID, weights = ~asthma_weights, data = data.frame(y = meth, dat1))
@@ -302,10 +319,10 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
 }
 
-results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.wgt, pheno)
+results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.wgt, pheno)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "output/former_strat/model12_weighted.4.csv")
+write.csv(results, "output/former_stratified/model12_weighted.4.csv")
 
 
 ################################################################################################################
@@ -321,7 +338,6 @@ write.csv(results, "output/former_strat/model12_weighted.4.csv")
 
 
 ##Model 1 unweighted euro
-system('mkdir -p output/five_year')
 for (i in 3:6) {
   f.RLM.Adj.Robust.unwgt <- function(meth, dat1,j) {
     dat <- svydesign(id = ~Sample_ID, data = data.frame(y = meth, dat1))
@@ -340,7 +356,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc,i)
+  results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/five_year/model1_unweighted.",i,".csv"))
@@ -366,7 +382,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.unwgt, pheno,i)
+  results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.unwgt, pheno,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/five_year/model10_unweighted.",i,".csv"))
@@ -416,7 +432,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc,i)
+  results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/five_year/model3_weighted.",i,".csv"))
@@ -451,7 +467,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.wgt, pheno,i)
+  results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.wgt, pheno,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/five_year/model12_weighted.",i,".csv"))
@@ -470,7 +486,6 @@ for (i in 3:6) {
 
 
 ##Model 1 unweighted euro
-system('mkdir -p ten_year')
 for (i in 3:6) {
   f.RLM.Adj.Robust.unwgt <- function(meth, dat1,j) {
     dat <- svydesign(id = ~Sample_ID, data = data.frame(y = meth, dat1))
@@ -489,7 +504,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc,i)
+  results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.unwgt, pheno_pc,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/ten_year/model1_unweighted.",i,".csv"))
@@ -515,7 +530,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.unwgt, pheno,i)
+  results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.unwgt, pheno,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/ten_year/model10_unweighted.",i,".csv"))
@@ -565,7 +580,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc,i)
+  results <- parApply(cl, betap_pc, 2, f.RLM.Adj.Robust.wgt, pheno_pc,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/ten_year/model3_weighted.",i,".csv"))
@@ -600,7 +615,7 @@ for (i in 3:6) {
     names(out) = c("Beta","SE", "tstat", "P", "N", "N.exp", "N.unexp"); return(out) 
   }
   
-  results <- parApply(cl, beta2, 2, f.RLM.Adj.Robust.wgt, pheno,i)
+  results <- parApply(cl, betap, 2, f.RLM.Adj.Robust.wgt, pheno,i)
   results <- as.data.frame(t(results))
   Nbeta <- sum(!is.na(results$P))
   write.csv(results, paste0("output/ten_year/model12_weighted.",i,".csv"))
@@ -609,7 +624,6 @@ for (i in 3:6) {
 
 ############################################################################################################
 ##Formers only with cont years since quit
-system('mkdir -p output/continuous')
 f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   dat <- svydesign(id = ~Sample_ID, data = data.frame(y = meth, dat1))
   mdl.formula <- formula(paste("y ~ LH_TimeSinceSmked_v1 + ANYETS + Gender + LH_BMI + AgeAtHomeVisit + STATE + B + NK + CD4T + CD8T + Mono + Neutro + Eosino +
@@ -624,7 +638,7 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   out = c(coef, se, ts, p.value, N) 
   names(out) = c("Beta","SE", "tstat", "P", "N"); return(out) 
 }
-results <- parApply(cl, beta_formerpc, 2, f.RLM.Adj.Robust.wgt, pheno_formerpc)
+results <- parApply(cl, betap_formerpc, 2, f.RLM.Adj.Robust.wgt, pheno_formerpc)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
 write.csv(results, "output/continuous/former_cont_EU_unweighted.csv")
@@ -645,7 +659,7 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N"); return(out) 
 }
 
-results <- parApply(cl, beta_formerpc, 2, f.RLM.Adj.Robust.wgt, pheno_formerpc)
+results <- parApply(cl, betap_formerpc, 2, f.RLM.Adj.Robust.wgt, pheno_formerpc)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
 write.csv(results, "output/continuous/former_cont_EU_weighted.csv")
@@ -667,7 +681,7 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   out = c(coef, se, ts, p.value, N) 
   names(out) = c("Beta","SE", "tstat", "P", "N"); return(out) 
 }
-results <- parApply(cl, beta_former, 2, f.RLM.Adj.Robust.wgt, pheno_former)
+results <- parApply(cl, betap_former, 2, f.RLM.Adj.Robust.wgt, pheno_former)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
 write.csv(results, "output/continuous/former_cont_TA_unweighted.csv")
@@ -688,7 +702,7 @@ f.RLM.Adj.Robust.wgt <- function(meth, dat1) {
   names(out) = c("Beta","SE", "tstat", "P", "N"); return(out) 
 }
 
-results <- parApply(cl, beta_former, 2, f.RLM.Adj.Robust.wgt, pheno_former)
+results <- parApply(cl, betap_former, 2, f.RLM.Adj.Robust.wgt, pheno_former)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
 write.csv(results, "output/continuous/former_cont_TA_weighted.csv")
@@ -700,157 +714,39 @@ write.csv(results, "output/continuous/former_cont_TA_weighted.csv")
 
 
 ################################################################################################################
-
 library(data.table)
-library(sesame)
-library(wheatmap)
-library(multtest)
-library(limma)
-library(RColorBrewer)
-library(ggplot2)
-library(minfi)
-library(ChAMP)
-library(impute)
-library(annotatr)
-library(tidyr)
-library(ggpubr)
-annots<- c("hg38_genes_1to5kb","hg38_genes_promoters", 
-           "hg38_genes_cds", 
-           "hg38_genes_5UTRs", 
-           "hg38_genes_exons",
-           "hg38_basicgenes", 
-           "hg38_cpgs",
-           "hg38_genes_firstexons","hg38_genes_introns", 
-           "hg38_genes_intronexonboundaries", 
-           "hg38_genes_exonintronboundaries","hg38_genes_3UTRs", 
-           "hg38_genes_intergenic", "hg38_cpg_islands", "hg38_cpg_shores", 
-           "hg38_cpg_shelves")#, 
-#"hg38_cpg_inter", "hg38_lncrna_gencode")
-annotations = build_annotations(genome = 'hg38', annotations = annots)
 
+bonf <- 0.05/230325
+manifest <- fread("references/MSA.hg38.manifest.gencode.v41.tsv.gz")
 
-
-################
-##unweighted
-#uws <- fread('unweighted_smokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.csv')
-#uwf <- fread('unweighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.csv')
-fin<- c('model1_unweighted.3.csv','model1_unweighted.4.csv','model1_unweighted.5.csv','model1_unweighted.6.csv',
-        'model10_unweighted.3.csv','model10_unweighted.4.csv','model10_unweighted.5.csv','model10_unweighted.6.csv',
-        'model3_weighted.3.csv','model3_weighted.4.csv','model3_weighted.5.csv','model3_weighted.6.csv',
-        'model12_weighted.3.csv','model12_weighted.4.csv','model12_weighted.5.csv','model12_weighted.6.csv')
-bonf<- 0.05/230329 
-tsv_path <- "references/MSA.hg38.manifest.gencode.v41.tsv.gz"
-manifest = fread(tsv_path)
-for(f in fin){
-  uws <- fread(paste0('output/five_year/',f))
-  siguws <- uws %>% dplyr::filter(uws$P<=bonf)
-  siguw_anno <- left_join(siguws,manifest,by=c("V1"="probeID"))
-  f1 <- substring(f,1,nchar(f)-4)
-  write.table(siguw_anno,file=paste0("output/five_year/signifcant_",f1,".tsv"),sep='\t',quote = F,na = "",row.names = F)
-  uws <- fread(paste0('output/ten_year/',f))
-  siguws <- uws %>% dplyr::filter(uws$P<=bonf)
-  siguw_anno <- left_join(siguws,manifest,by=c("V1"="probeID"))
-  f2 <- substring(f,1,nchar(f)-4)
-  write.table(siguw_anno,file=paste0("output/ten_year/signifcant_",f2,".tsv"),sep='\t',quote = F,na = "",row.names = F)
-}     
-fin=c('former_cont_EU_unweighted.csv','former_cont_EU_weighted.csv',
-      'former_cont_TA_unweighted.csv','former_cont_TA_weighted.csv')
-for(f in fin){
-  uws <- fread(paste0('output/continuous/',f))
-  siguws <- uws %>% dplyr::filter(uws$P<=bonf)
-  siguw_anno <- left_join(siguws,manifest,by=c("V1"="probeID"))
-  f1 <- substring(f,1,nchar(f)-4)
-  write.table(siguw_anno,file=paste0("output/continuous/signifcant_",f1,".tsv"),sep='\t',quote = F,na = "",row.names = F)
-}     
-  ####################################################
-m1 <- fread('output/model_output/svyglm_sginificant_cpgs/unweighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m1le <- fread('signifcant_model1_unweighted.3.tsv') %>% select(V1)
-colnames(m1le)<-'Probe_ID'
-m1gt <- fread('signifcant_model1_unweighted.4.tsv') %>% select(V1)
-colnames(m1gt)<-'Probe_ID'
-m1gtnole<- m1 %>% select(Probe_ID,CpG_chrm,CpG_beg,probe_strand,genesUniq) %>% inner_join(.,m1gt) 
-
-
-m10 <- fread('output/model_output/svyglm_sginificant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m10le <- fread('signifcant_model10_unweighted.3.tsv') %>% select(V1)
-colnames(m10le)<-'Probe_ID'
-m10gt <- fread('signifcant_model10_unweighted.4.tsv') %>% select(V1)
-colnames(m10gt)<-'Probe_ID'
-m10gtnole<- m10 %>% select(Probe_ID,CpG_chrm,CpG_beg,probe_strand,genesUniq) %>% inner_join(.,m10gt)
-
-
-m3 <- fread('output/model_output/svyglm_sginificant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m3le <- fread('signifcant_model3_weighted.3.tsv') %>% select(V1)
-colnames(m3le)<-'Probe_ID'
-m3gt <- fread('signifcant_model3_weighted.4.tsv') %>% select(V1)
-colnames(m3gt)<-'Probe_ID'
-m3gtnole<- m3 %>% select(Probe_ID,CpG_chrm,CpG_beg,probe_strand,genesUniq) %>% inner_join(.,m3gt) 
-
-
-m12 <- fread('output/model_output/svyglm_sginificant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m12le <- fread('signifcant_model12_weighted.3.tsv') %>% select(V1)
-colnames(m12le)<-'Probe_ID'
-m12gt <- fread('signifcant_model12_weighted.4.tsv') %>% select(V1)
-colnames(m12gt)<-'Probe_ID'
-m12gtnole<- m12 %>% select(Probe_ID,CpG_chrm,CpG_beg,probe_strand,genesUniq) %>% inner_join(.,m12gt)
-
-
-write.table(m1gtnole,file='output/former_strat/model1_overlap.tsv',sep='\t',quote=F,row.names = F)
-write.table(m10gtnole,file='output/former_strat/model10_overlap.tsv',sep='\t',quote=F,row.names = F)
-write.table(m3gtnole,file='output/former_strat/model3_overlap.tsv',sep='\t',quote=F,row.names = F)
-write.table(m12gtnole,file='output/former_strat/model12_overlap.tsv',sep='\t',quote=F,row.names = F)
-
-library(openxlsx2)
-fy1 <- wb_workbook()
-fin = c("output/five_year/signifcant_model10_unweighted.3.tsv", "output/five_year/signifcant_model10_unweighted.4.tsv", 
-        "output/five_year/signifcant_model10_unweighted.5.tsv", "output/five_year/signifcant_model10_unweighted.6.tsv", 
-        "output/five_year/signifcant_model12_weighted.3.tsv", "output/five_year/signifcant_model12_weighted.4.tsv", 
-        "output/five_year/signifcant_model12_weighted.5.tsv", "output/five_year/signifcant_model12_weighted.6.tsv", 
-        "output/five_year/signifcant_model1_unweighted.3.tsv", "output/five_year/signifcant_model1_unweighted.4.tsv", 
-        "output/five_year/signifcant_model1_unweighted.5.tsv", "output/five_year/signifcant_model1_unweighted.6.tsv", 
-        "output/five_year/signifcant_model3_weighted.3.tsv", "output/five_year/signifcant_model3_weighted.4.tsv", 
-        "output/five_year/signifcant_model3_weighted.5.tsv", "output/five_year/signifcant_model3_weighted.6.tsv"
+analysis_dirs <- c(
+  "output/former_stratified",
+  "output/five_year",
+  "output/ten_year",
+  "output/continuous"
 )
-for(f in fin){
-  uws <- fread(f)
-  f1 = substring(f,1,nchar(f)-4) %>% substring(.,23)
-  fy1 <- wb_add_worksheet(fy1, sheet = f1)
-  fy1 <- wb_add_data(fy1, f1, uws)
-} 
-fy1$save("output/five_year_split_05.22.2025.xlsx")
 
-fin = c("output/ten_year/signifcant_model10_unweighted.3.tsv", "output/ten_year/signifcant_model10_unweighted.4.tsv", 
-  "output/ten_year/signifcant_model10_unweighted.5.tsv", "output/ten_year/signifcant_model10_unweighted.6.tsv", 
-  "output/ten_year/signifcant_model12_weighted.3.tsv", "output/ten_year/signifcant_model12_weighted.4.tsv", 
-  "output/ten_year/signifcant_model12_weighted.5.tsv", "output/ten_year/signifcant_model12_weighted.6.tsv", 
-  "output/ten_year/signifcant_model1_unweighted.3.tsv", "output/ten_year/signifcant_model1_unweighted.4.tsv", 
-  "output/ten_year/signifcant_model1_unweighted.5.tsv", "output/ten_year/signifcant_model1_unweighted.6.tsv", 
-  "output/ten_year/signifcant_model3_weighted.3.tsv", "output/ten_year/signifcant_model3_weighted.4.tsv", 
-  "output/ten_year/signifcant_model3_weighted.5.tsv", "output/ten_year/signifcant_model3_weighted.6.tsv"
-)
-ty1 <- wb_workbook()
-for(f in fin){
-  uws <- fread(f)
-  f1 = substring(f,1,nchar(f)-4) %>% substring(.,22)
-  ty1 <- wb_add_worksheet(ty1, sheet = f1)
-  ty1 <- wb_add_data(ty1, f1, uws)
-} 
-ty1$save("output/ten_year_split_05.22.2025.xlsx")
+annotate_significant <- function(input_dir) {
+  files <- list.files(input_dir, pattern="\\.csv$", full.names=TRUE)
+  
+  for (f in files) {
+    results <- fread(f)
+    
+    if ("V1" %in% names(results)) setnames(results, "V1", "Probe_ID")
+    if (!"Probe_ID" %in% names(results)) stop("Probe ID column not found in: ", f)
+    if (!"P" %in% names(results)) stop("P-value column not found in: ", f)
+    
+    significant <- results[P <= bonf]
+    significant <- merge(significant, manifest, by.x="Probe_ID", by.y="probeID", all.x=TRUE, sort=FALSE)
+    
+    output_file <- file.path(input_dir, paste0("significant_", tools::file_path_sans_ext(basename(f)), ".tsv"))
+    fwrite(significant, output_file, sep="\t", na="")
+    
+    message(basename(f), ": ", nrow(significant), " significant probes")
+  }
+}
 
-fin = c("output/continuous/signifcant_former_cont_EU_unweighted.tsv", "output/output/continuous/signifcant_former_cont_EU_weighted.tsv", 
-        "output/continuous/signifcant_former_cont_TA_unweighted.tsv", "output/output/continuous/signifcant_former_cont_TA_weighted.tsv"
-)
-cont <- wb_workbook()
-for(f in fin){
-  uws <- fread(f)
-  f1 = substring(f,1,nchar(f)-4) %>% substring(.,23)
-  cont <- wb_add_worksheet(cont, sheet = f1)
-  cont <- wb_add_data(cont, f1, uws)
-} 
-cont$save("output/cont_yrs_since_smkd_05.22.2025.xlsx")
-
-
-
+for (d in analysis_dirs) annotate_significant(d)
 
 
 ###############################################################################################################
@@ -865,27 +761,80 @@ library(stringr)
 library(tidyr)
 library(ggplot2)
 library(ggpubr)
-load('../mini_models_probe_filt.rdata')
+load('751_clean_pc.rdata')
 beta2 = t(betas) # methylation data
 pheno = sampsheetGF
 
-fm1 <- fread('output/model_output/svyglm_sginificant_cpgs/unweighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv') %>%
+fm1 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv') %>%
             filter(stringr::str_detect(genesUniq,'ECEL1P1|AHRR|PDCD6-AHRR')) %>%
             dplyr::select(Probe_ID,genesUniq)
-fm3 <- fread('output/model_output/svyglm_sginificant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
+fm3 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1|AHRR|PDCD6-AHRR')) %>%
   dplyr::select(Probe_ID,genesUniq)
-fm10 <- fread('output/model_output/svyglm_sginificant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
+fm10 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1|AHRR|PDCD6-AHRR')) %>%
   dplyr::select(Probe_ID,genesUniq)
-fm12 <- fread('output/model_output/svyglm_sginificant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
+fm12 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1|AHRR|PDCD6-AHRR')) %>%
   dplyr::select(Probe_ID,genesUniq)
 fm <- bind_rows(list(fm1,fm3,fm10,fm12)) %>% distinct()
 probes <- fm$Probe_ID
 
 
-## plot the probes by split
+new_pheno <- data.table::fread('samplesheets/lhs28901_Methylation_Phenotype_2025APR29.txt',sep=',')
+np<-new_pheno%>% filter(LHID %in% pheno$LHID,COMMENT!='Replicate')
+x<-colnames(np)[!colnames(np) %in% colnames(pheno)]
+np <- np %>% dplyr::select(LHID,partid, x)
+pheno <- left_join(pheno,np,by=c('LHID','partid'))
+pheno=pheno%>%mutate(LEL19=ifelse(LEL19=="Yes",1,ifelse(LEL19=="No",0,99)))
+pheno$LEL19=as.factor(pheno$LEL19)
+
+pheno=pheno%>%mutate(LH_smoke_status=case_when(LH_smoke_status=="Never"~0,
+                                               LH_smoke_status=="Former"~1,
+                                               LH_smoke_status=="Current"~2,
+                                               LH_smoke_status=="M"~99))
+pheno$LH_smoke_status=as.factor(pheno$LH_smoke_status)
+
+pheno=pheno%>%mutate(European=case_when(European=="European"~1,
+                                        European=="Non_European"~0,
+                                        European=="GWAS sample failure"~99))
+pheno$European=as.factor(pheno$European)
+#inrdsx<- tibble::rownames_to_column(data.frame(inrdsx),var="Sample_ID")
+#pheno <- left_join(pheno,inrdsx,by="Sample_ID")
+#pheno <- pheno %>% mutate(inrdsx = tolower(inrdsx))
+pheno$Gender <- as.factor(pheno$Gender)
+pheno$inrdsx <-as.factor(pheno$inrdsx)
+pheno <- pheno %>% mutate( ANYETS = case_when(ANYETS =="No"~0,ANYETS=="Yes"~1))
+pheno <- pheno %>% mutate(LHSSCREEN_12142015 = case_when(LHSSCREEN_12142015 == "Control"~0,LHSSCREEN_12142015 == "Case"~1))
+pheno <- pheno %>% mutate(Gender = case_when(Gender == 'male'~0,Gender=='female'~1))
+pheno <- pheno %>% mutate(STATE = case_when(STATE == 'IA'~0,STATE=='NC'~1))
+pheno$LHSSCREEN_12142015 = as.factor(pheno$LHSSCREEN_12142015)
+pheno$ANYETS = as.factor(pheno$ANYETS)
+pheno$STATE = as.factor(pheno$STATE)
+pheno <- pheno %>% mutate(smokeXasthma = paste0(LH_smoke_status,'_',LHSSCREEN_12142015))
+pheno$smokeXasthma <- as.factor(pheno$smokeXasthma)
+pheno$LH_LastSmkedLE5YrAgo_v1 <-factor(pheno$LH_LastSmkedLE5YrAgo_v1, levels = c("0) LE 5 yrs ago","1) GT 5 yrs ago"))
+
+pheno = pheno %>% mutate(smoke_statusF = case_when(LH_smoke_status == 1 & LH_LastSmkedLE5YrAgo_v1=="0) LE 5 yrs ago" ~ factor(3),
+                                                   LH_smoke_status == 1 & LH_LastSmkedLE5YrAgo_v1=="1) GT 5 yrs ago" ~ factor(4),
+                                                   .default = LH_smoke_status))
+pheno$smoke_statusF <- as.factor(pheno$smoke_statusF) %>% droplevels(.,exclude=1)
+pheno$smoke_statusF <- factor(pheno$smoke_statusF, levels = c(0,2,3,4,99))
+
+pheno <- pheno %>% mutate(former_5yrs_split = case_when(LH_smoke_status == 0 ~ factor('Never Smoker'),
+                                                        LH_smoke_status == 2 ~ factor('Current Smoker'),
+                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 <= 5 ~ factor('<=5yrs'),
+                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 5 & LH_TimeSinceSmked_v1 <= 10 ~ factor('6-10yrs'),
+                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 10 & LH_TimeSinceSmked_v1 <= 15 ~ factor('11-15yrs'),
+                                                        LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 15 ~ factor('>15yrs'),
+                                                        LH_smoke_status == 99 ~ factor('Missing')))
+pheno <- pheno %>% mutate(former_10yrs_split = case_when(LH_smoke_status == 0 ~ factor('Never Smoker'),
+                                                         LH_smoke_status == 2 ~ factor('Current Smoker'),
+                                                         LH_smoke_status == 1 & LH_TimeSinceSmked_v1 <= 10 ~ factor('<=10yrs'),
+                                                         LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 10 & LH_TimeSinceSmked_v1 <= 20 ~ factor('11-20yrs'),
+                                                         LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 20 & LH_TimeSinceSmked_v1 <= 30 ~ factor('21-30yrs'),
+                                                         LH_smoke_status == 1 & LH_TimeSinceSmked_v1 > 30 ~ factor('>30yrs'),
+                                                         LH_smoke_status == 99 ~ factor('Missing')))
 epic <- fread('references/EPIC.hg38.manifest.gencode.v36.tsv.gz') %>% mutate(epicT =T) %>% dplyr::select(probeID,epicT)
 fourfity<- fread('references/HM450.hg38.manifest.tsv.gz')%>% mutate(ffiftyT =T) %>% dplyr::select(Probe_ID,ffiftyT)
 ##reduce probes to cpgs
@@ -893,7 +842,7 @@ probies <- manifest %>% filter(probeID %in% probes) %>% dplyr::select(probeID,ge
   mutate(cpg = gsub(x = probeID, '\\_.*','')) %>% 
   left_join(epic,by=c('cpg'='probeID')) %>% left_join(fourfity,by=c('cpg'='Probe_ID')) %>% replace_na(list(epicT=FALSE,ffiftyT=FALSE)) %>%
   mutate(msa_only=case_when(epicT==TRUE | ffiftyT==TRUE ~ FALSE,.default=TRUE))
-pdf("output/ahrr_ecel1p1_former_10yr_split.pdf")
+pdf("output/former_stratified/ahrr_ecel1p1_former_10yr_split.pdf")
 for(p in probes){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
@@ -917,7 +866,7 @@ for(p in probes){
 dev.off()
 
 
-pdf("output/ahrr_ecel1p1_former_5yr_split.pdf")
+pdf("output/former_stratified/ahrr_ecel1p1_former_5yr_split.pdf")
 for(p in probes){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
@@ -946,13 +895,13 @@ dev.off()
 #####################################################################################################################################
 ## Grab T-statistics 
 m<-c("1_un","3_","10_un","12_")
-pdf("output/ahrr_ecel1p1_former_5yr_tstat.pdf",width=10)
+pdf("output/former_stratified/ahrr_ecel1p1_former_5yr_tstat.pdf",width=10)
 for (i in m) {
-    fm2 <- fread(paste0('five_year/model',i,'weighted.2.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = 'Current')
-    fm3 <- fread(paste0('five_year/model',i,'weighted.3.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '<=5yr')
-    fm4 <- fread(paste0('five_year/model',i,'weighted.4.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '6-10yr')
-    fm5 <- fread(paste0('five_year/model',i,'weighted.5.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '11-15yr')
-    fm6 <- fread(paste0('five_year/model',i,'weighted.6.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '>15yr')
+    fm2 <- fread(paste0('output/five_year/model',i,'weighted.2.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = 'Current')
+    fm3 <- fread(paste0('output/five_year/model',i,'weighted.3.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '<=5yr')
+    fm4 <- fread(paste0('output/five_year/model',i,'weighted.4.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '6-10yr')
+    fm5 <- fread(paste0('output/five_year/model',i,'weighted.5.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '11-15yr')
+    fm6 <- fread(paste0('output/five_year/model',i,'weighted.6.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '>15yr')
     fm <- bind_rows(list(fm2,fm3,fm4,fm5,fm6))
     fm$smoke <- factor(fm$smoke,levels = c('Current','<=5yr','6-10yr','11-15yr','>15yr'))
     fm <- fm %>% left_join(.,probies,by=c('V1'='probeID'))
@@ -963,13 +912,13 @@ for (i in m) {
     
 }    
 dev.off()
-pdf("output/ahrr_ecel1p1_former_10yr_tstat.pdf",width=10)
+pdf("output/former_stratified/ahrr_ecel1p1_former_10yr_tstat.pdf",width=10)
 for (i in m) {
-    fm2 <- fread(paste0('ten_year/model',i,'weighted.2.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = 'Current')
-    fm3 <- fread(paste0('ten_year/model',i,'weighted.3.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '<=10yr')
-    fm4 <- fread(paste0('ten_year/model',i,'weighted.4.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '11-20yr')
-    fm5 <- fread(paste0('ten_year/model',i,'weighted.5.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '21-30yr')
-    fm6 <- fread(paste0('ten_year/model',i,'weighted.6.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '>30yr')
+    fm2 <- fread(paste0('output/ten_year/model',i,'weighted.2.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = 'Current')
+    fm3 <- fread(paste0('output/ten_year/model',i,'weighted.3.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '<=10yr')
+    fm4 <- fread(paste0('output/ten_year/model',i,'weighted.4.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '11-20yr')
+    fm5 <- fread(paste0('output/ten_year/model',i,'weighted.5.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '21-30yr')
+    fm6 <- fread(paste0('output/ten_year/model',i,'weighted.6.csv')) %>% dplyr::filter(V1 %in% probes) %>% dplyr::mutate(smoke = '>30yr')
     fm <- bind_rows(list(fm2,fm3,fm4,fm5,fm6))
     fm$smoke <- factor(fm$smoke,levels = c('Current','<=10yr','11-20yr','21-30yr','>30yr'))
     fm <- fm %>% left_join(.,probies,by=c('V1'='probeID'))
@@ -989,25 +938,25 @@ dev.off()
 
 library(ggvenn)
 m<-c(1,3,10,12)
-m1 <- fread('output/model_output/svyglm_sginificant_cpgs/unweighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m10 <- fread('output/model_output/svyglm_sginificant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m3 <- fread('output/model_output/svyglm_sginificant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
-m12 <- fread('output/model_output/svyglm_sginificant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
+m1 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
+m10 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
+m3 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
+m12 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
 
-s1 <- fread('output/significant_cpgs/svyglm/smokers/imputed/unweighted_smokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
-s10 <- fread('output/significant_cpgs/svyglm/smokers/imputed/unweighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
-s3 <- fread('output/significant_cpgs/svyglm/smokers/imputed/weighted_smokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
-s12 <- fread('output/significant_cpgs/svyglm/smokers/imputed/weighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
+s1 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_smokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
+s10 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
+s3 <- fread('output/model_output/svyglm_significant_cpgs/weighted_smokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
+s12 <- fread('output/model_output/svyglm_significant_cpgs/weighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
 mm=list(m1,'',m3,'','','','','','',m10,'',m12)
 ss<-list(s1,'',s3,'','','','','','',s10,'',s12)
 tt<-c('','','<= 5 years','6-10 years','11-15 years','> 15 years')
-pdf('output/venn_five_year.pdf')
+pdf('output/five_year/venn_five_year.pdf')
 for (i in m) {
-  fm2 <- fread(paste0('five_year/model',i,'.2.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Current')
-  fm3 <- fread(paste0('five_year/model',i,'.3.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '<=5yr')
-  fm4 <- fread(paste0('five_year/model',i,'.4.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '6-10yr')
-  fm5 <- fread(paste0('five_year/model',i,'.5.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '11-15yr')
-  fm6 <- fread(paste0('five_year/model',i,'.6.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '>15yr')
+  fm2 <- fread(paste0('output/five_year/model',i,'.2.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Current')
+  fm3 <- fread(paste0('output/five_year/model',i,'.3.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '<=5yr')
+  fm4 <- fread(paste0('output/five_year/model',i,'.4.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '6-10yr')
+  fm5 <- fread(paste0('output/five_year/model',i,'.5.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '11-15yr')
+  fm6 <- fread(paste0('output/five_year/model',i,'.6.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '>15yr')
   fog <- mm[[i]]
   sog<- ss[[i]]
   x = list(Original_Former_Smoker_Model=fog$Probe_ID,
@@ -1030,13 +979,13 @@ dev.off()
 
 
 tt<-c('','','<= 10 years','11-20 years','21-30 years','> 30 years')
-pdf('output/venn_ten_year.pdf')
+pdf('output/ten_year/venn_ten_year.pdf')
 for (i in m) {
-  fm2 <- fread(paste0('ten_year/model',i,'.2.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Current')
-  fm3 <- fread(paste0('ten_year/model',i,'.3.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '<=10yr')
-  fm4 <- fread(paste0('ten_year/model',i,'.4.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '11-20yr')
-  fm5 <- fread(paste0('ten_year/model',i,'.5.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '21-30yr')
-  fm6 <- fread(paste0('ten_year/model',i,'.6.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '>30 yr')
+  fm2 <- fread(paste0('output/ten_year/model',i,'.2.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Current')
+  fm3 <- fread(paste0('output/ten_year/model',i,'.3.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '<=10yr')
+  fm4 <- fread(paste0('output/ten_year/model',i,'.4.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '11-20yr')
+  fm5 <- fread(paste0('output/ten_year/model',i,'.5.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '21-30yr')
+  fm6 <- fread(paste0('output/ten_year/model',i,'.6.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = '>30 yr')
   fog <- mm[[i]]
   sog<- ss[[i]]
   x = list(Original_Former_Smoker_Model=fog$Probe_ID,
@@ -1057,13 +1006,13 @@ for (i in m) {
 dev.off()
 
 tt<-c('','','Unweighted Euro','Weighted Euro','Unweighted Trans-ancestry','Weighted Trans-ancestry')
-pdf('output/venn_continuous.pdf')
+pdf('output/continuous/venn_continuous.pdf')
 for (i in m) {
-  #fm2 <- fread(paste0('ten_year/model',i,'.2.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Current')
-  fm3 <- fread(paste0('continuous/former_cont_EU_unweighted.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Unweighted Euro')
-  fm4 <- fread(paste0('continuous/former_cont_EU_weighted.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Weighted Euro')
-  fm5 <- fread(paste0('continuous/former_cont_TA_unweighted.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Unweighted TA')
-  fm6 <- fread(paste0('continuous/former_cont_TA_weighted.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Weighted TA')
+  #fm2 <- fread(paste0('output/ten_year/model',i,'.2.csv')) %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Current')
+  fm3 <- fread('output/continuous/former_cont_EU_unweighted.csv') %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Unweighted Euro')
+  fm4 <- fread('output/continuous/former_cont_EU_weighted.csv') %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Weighted Euro')
+  fm5 <- fread('output/continuous/former_cont_TA_unweighted.csv') %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Unweighted TA')
+  fm6 <- fread('output/continuous/former_cont_TA_weighted.csv') %>% dplyr::filter(P<=bonf) %>% dplyr::mutate(smoke = 'Weighted TA')
   fog <- mm[[i]]
   sog<- ss[[i]]
   x = list(Original_Former_Smoker_Model=fog$Probe_ID,
@@ -1090,7 +1039,7 @@ dev.off()
 ## Plot Betas vs continuous time since smoked
 
 
-pdf("output/ahrr_ecel1p1_scatter_plot.pdf")
+pdf("output/former_stratified/ahrr_ecel1p1_scatter_plot.pdf")
 for(p in probes){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
@@ -1118,7 +1067,7 @@ for(p in probes){
 dev.off()
 ################
 ## Just former smokers
-pdf("output/ahrr_ecel1p1_scatter_plot_former_only.pdf")
+pdf("output/former_stratified/ahrr_ecel1p1_scatter_plot_former_only.pdf")
 for(p in probes){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
@@ -1147,7 +1096,7 @@ dev.off()
 
 ####################
 ## With avg lines
-pdf("output/ahrr_ecel1p1_scatter_plot_former_only.pdf")
+pdf("output/former_stratified/ahrr_ecel1p1_scatter_plot_former_only.pdf")
 for(p in probes){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
@@ -1180,7 +1129,7 @@ for(p in probes){
 }
 dev.off()
 
-pdf("output/ahrr_ecel1p1_scatter_plot_former_only_with4splines_wo_se.pdf")
+pdf("output/former_stratified/ahrr_ecel1p1_scatter_plot_former_only_with4splines_wo_se.pdf")
 for(p in probes){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
@@ -1226,7 +1175,7 @@ ahrr_ecel1p1 <- data.frame(beta_probes) %>% tibble::rownames_to_column(.,'Sample
                                                                                LH_smoke_status == 2 ~ 'Current Smoker',
                                                                                LH_smoke_status == 1 ~ 'Former Smoker')) %>% 
   dplyr::select(Sample_ID,probes,LH_TimeSinceSmked_v1,LH_TimeSinceSmked_v1.2,LH_smoke_status,smoke_status,former_5yrs_split,former_10yrs_split)
-save(ahrr_ecel1p1,file='ahrr_ecel1p1_betas.rdata')
+save(ahrr_ecel1p1,file='output/former_stratified/ahrr_ecel1p1_betas.rdata')
 beta_probes <- as.data.frame(beta2) %>% dplyr::select(probes)
 
 for(meth in colnames(beta_probes)){
@@ -1249,9 +1198,9 @@ for(meth in colnames(beta_probes)){
 ########################################################################################################################
 ## Predicted Betas for former smokers with >0 yrs since smoking
 
-preds <- fread('probe_predicted_beta.csv')
+preds <- fread('output/former_stratified/probe_predicted_beta.csv')
 probes<-names(preds)[3:length(names(preds))]
-pdf("output/ahrr_ecel1p1_predicted_scatter_plot.pdf",width=11)
+pdf("output/former_stratified/ahrr_ecel1p1_predicted_scatter_plot.pdf",width=11)
 for(p in probes){
   ##gsub to get correct names
   ##we need to grab current and never betas to get median and %
@@ -1313,7 +1262,7 @@ for(p in probes){
 }
 dev.off()
 
-pdf("output/ahrr_ecel1p1_median_scatter_plot.pdf",width=11)
+pdf("output/former_stratified/ahrr_ecel1p1_median_scatter_plot.pdf",width=11)
 for(p in probes){
   ##gsub to get correct names
   ##we need to grab current and never betas to get median and %

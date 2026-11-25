@@ -2,12 +2,16 @@
 ### methylation & phenotype data
 library(dplyr)
 
-load('output/rdata/cleaned_MSA_niehs_alhs.rdata')
+load('751_clean_pc.rdata')
+dir.create("output/model_output/svyglm", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/model_output/svyglm_anno", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/model_output/svyglm_significant_cpgs", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/cdmc", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/former_stratified", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/ecel1p1", recursive=TRUE, showWarnings=FALSE)
 beta2 = t(clean_betas) # methylation data
 betap <- t(clean_betas_pval_masked)
 pheno = clean_sampsheet# phenotype data
-
-setwd('former_strat_sensitivity/')
 
 ### EWAS
 
@@ -265,7 +269,7 @@ fcbetas <- left_join(rownames_to_column(fcbetas),ed_fc,by =c("rowname"= 'Sample_
 
 library(cowplot)
 library(egg)
-pdf(file = "output/never_current_beta_dmc.pdf", width=12, height=4)
+pdf(file = "output/cdmc/never_current_beta_dmc.pdf", width=12, height=4)
 for(i in 2:(length(colnames(ncbetas))-7)){
   B <- ggplot(ncbetas, aes(x=as.numeric(B), y=as.numeric(!!sym(colnames(ncbetas)[i])), shape=LH_smoke_status, color=LH_smoke_status)) +
     geom_point() + geom_smooth(aes(group=LH_smoke_status),method='loess') + labs(x = colnames(ncbetas)[i],y = "B")
@@ -284,7 +288,7 @@ for(i in 2:(length(colnames(ncbetas))-7)){
 }
 dev.off()
 
-pdf(file = "output/former_current_beta_dmc.pdf", width=12, height=4)
+pdf(file = "output/cdmc/former_current_beta_dmc.pdf", width=12, height=4)
 for(i in 2:(length(colnames(fcbetas))-7)){
   B <- ggplot(fcbetas, aes(x=as.numeric(B), y=as.numeric(!!sym(colnames(fcbetas)[i])), shape=LH_smoke_status, color=LH_smoke_status)) +
     geom_point() + geom_smooth(aes(group=LH_smoke_status),method='loess') + labs(x = colnames(fcbetas)[i],y = "B")
@@ -303,10 +307,10 @@ for(i in 2:(length(colnames(fcbetas))-7)){
 }
 dev.off()
 
-save(cdmc_nc,cdmc_nf,cdmc_fc, file='output/cell_dmc_sensitvity.rdata')
-write.table(cdmc_nc$dmct,sep='\t',file= "output/cell_dmc_never_current.tsv",quote = F)
-write.table(cdmc_fc$dmct,sep='\t',file= "output/cell_dmc_former_current.tsv",quote = F)
-write.table(cdmc_nf$dcmt,sep='\t',file= "output/cell_dmc_never_former.tsv",quote = F)
+save(cdmc_nc,cdmc_nf,cdmc_fc, file='output/cdmc/cell_dmc_sensitvity.rdata')
+write.table(cdmc_nc$dmct,sep='\t',file= "output/cdmc/cell_dmc_never_current.tsv",quote = F)
+write.table(cdmc_fc$dmct,sep='\t',file= "output/cdmc/cell_dmc_former_current.tsv",quote = F)
+write.table(cdmc_nf$dcmt,sep='\t',file= "output/cdmc/cell_dmc_never_former.tsv",quote = F)
 
 
 stopCluster(cl)
@@ -345,7 +349,7 @@ annotations = build_annotations(genome = 'hg38', annotations = annots)
 ################
 ## SVYGLM
 ###############
-fin<- system('ls former_strat_sensitivity/output/model_output/svyglm/*.csv',intern=T)
+fin<- system('ls output/model_output/svyglm/*.csv',intern=T)
 bonf<- 0.05/230325 
 tsv_path <- "references/MSA.hg38.manifest.gencode.v41.tsv.gz"
 manifest = fread(tsv_path)
@@ -355,9 +359,9 @@ for(f in fin){
   siguws <- uws %>% arrange(P)#%>% dplyr::filter(uws$P<=bonf)
   siguw_anno <- left_join(siguws,manifest,by=c("V1"="probeID"))
   f <- substring(f,74) %>% substring(.,1,nchar(.)-4)
-  write.table(siguw_anno,file=paste0("former_strat_sensitivity/output/model_output/svyglm_anno/",f,".tsv"),sep='\t',quote = F,na = "",row.names = F)
+  write.table(siguw_anno,file=paste0("output/model_output/svyglm_anno/",f,".tsv"),sep='\t',quote = F,na = "",row.names = F)
 }     
-fin<- system('ls former_strat_sensitivity/output/model_output/svyglm_anno/*.tsv',intern=T)
+fin<- system('ls output/model_output/svyglm_anno/*.tsv',intern=T)
 
 for(f in fin){
   uws <- fread(f,header = T)
@@ -365,7 +369,7 @@ for(f in fin){
   colnames(uws)<- c('Probe_ID','Beta','SE','P','N','N.exp','N.unexp','CpG_chrm','CpG_beg','CpG_end','probe_strand','genesUniq','geneNames','transcriptTypes','transcriptIDs','distToTSS')
   siguws <- uws %>% dplyr::filter(uws$P<=bonf) %>% arrange(P) 
   f <- substring(f,79)
-  write.table(siguws,file=paste0("former_strat_sensitivity/output/model_output/significant_models/",f),sep='\t',quote = F,na = "",row.names = F)
+  write.table(siguws,file=paste0("output/model_output/svyglm_significant_cpgs/",f),sep='\t',quote = F,na = "",row.names = F)
 }    
 
 
@@ -379,7 +383,7 @@ fm1 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmoke
 fm3 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1|AHRR|PDCD6-AHRR')) %>%
   dplyr::select(Probe_ID,genesUniq)
-fm10 <- fread('output/model_outputsvyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
+fm10 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1|AHRR|PDCD6-AHRR')) %>%
   dplyr::select(Probe_ID,genesUniq)
 fm12 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
@@ -394,7 +398,7 @@ fm1 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmoke
 fm3 <- fread('output/model_output/svyglm_significant_cpgs/unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1')) %>%
   dplyr::select(Probe_ID,genesUniq)
-fm10 <- fread('output/model_outputsvyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
+fm10 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
   filter(stringr::str_detect(genesUniq,'ECEL1P1')) %>%
   dplyr::select(Probe_ID,genesUniq)
 fm12 <- fread('output/model_output/svyglm_significant_cpgs/weighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
@@ -479,7 +483,7 @@ probes<-c(
 )
 ####################
 ## With avg lines
-pdf("output/ahrr_ecel1p1_mean_scatter_plot.pdf",width=11)
+pdf("output/former_stratified/ahrr_ecel1p1_mean_scatter_plot.pdf",width=11)
 for(p in probes){
   ##gsub to get correct names
   ##we need to grab current and never betas to get mean and %
@@ -523,7 +527,7 @@ dev.off()
 
 ####################
 ## With loess degree 0 defaults to moving average
-pdf("output/ahrr_ecel1p1_moving_avg_scatter_plot.pdf",width=11)
+pdf("output/former_stratified/ahrr_ecel1p1_moving_avg_scatter_plot.pdf",width=11)
 for(p in probes){
   ##gsub to get correct names
   ##we need to grab current and never betas to get mean and %
@@ -565,7 +569,7 @@ for(p in probes){
 }
 dev.off()
 
-pdf("output/ahrr_ecel1p1_median_scatter_plot.pdf",width=11)
+pdf("output/former_stratified/ahrr_ecel1p1_median_scatter_plot.pdf",width=11)
 for(p in probes){
   ##gsub to get correct names
   ##we need to grab current and never betas to get mean and %
@@ -621,7 +625,7 @@ ahec <- ahec %>% left_join(pheno,by=c("sample_id" = "Sample_ID"))
 ahec <- ahec %>% left_join(genes,by = 'probeID')
 ahec5 <- ahec %>% dplyr::select(sample_id,Beta,genesUniq,former_5yrs_split) %>% dplyr::group_by(genesUniq,former_5yrs_split) %>% summarise(mean_beta = mean(Beta,na.rm=T))%>%ungroup()
 ahec10 <- ahec %>% dplyr::select(sample_id,Beta,genesUniq,former_10yrs_split) %>% dplyr::group_by(genesUniq,former_10yrs_split) %>% summarise(mean_beta = mean(Beta,na.rm=T))%>%ungroup()
-pdf("ahrr_ecel1p1_former_5yr_mean_beta.pdf",width=10)
+pdf("output/former_stratified/ahrr_ecel1p1_former_5yr_mean_beta.pdf",width=10)
 ggplot(data=ahec5, aes(x=former_5yrs_split, y=mean_beta,group = genesUniq)) + geom_line(aes(color=genesUniq)) +
   ggtitle(paste0('Model ',i,'long-term')) + xlab('Years after quitting') + ylab('T-statistics') + theme_classic()
 
@@ -674,7 +678,7 @@ bonf<- 0.05/230325
 bonf_epic = 0.05/817235
 #sesameDataCache()
 manifest = fread(tsv_path)
-load('/output/rdata/cleaned_MSA_niehs_alhs.rdata')
+load('751_clean_pc.rdata')
 mani = fread("references/MSA.hg38.manifest.gencode.v41.tsv.gz") %>% dplyr::select(CpG_chrm, CpG_beg, CpG_end, probe_strand,probeID) %>%
   dplyr::filter(probeID %in% rownames(clean_betas))
 smokers=fread('output/model_output/svyglm_anno/unimputed_unweighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')%>%
@@ -742,7 +746,7 @@ custom.col <- c("","#7fcdbb","")
 custom.col <- c("#db9a9a", "#a33636","#290101")
 #cb_ecel_betas_long$smoke_status <- factor(cb_ecel_betas_long$smoke_status,levels=c('Never','Former','Current'))
 #group.colors = c(Current = "#3261cf", Former = "#a33636",Never)
-pdf('dmr.pdf',width=12)
+pdf('output/ecel1p1/dmr.pdf',width=12)
 ggplot(cb_ecel_betas_long,aes(x=cpg,y=beta,dot.size=0.03,color=smoke_status,fill=smoke_status)) +
   geom_dotplot(binwidth=0.006,stackratio =0.5, stackdir='center',position='identity',binaxis = "y",stroke=NA, alpha=0.9) +
   geom_smooth(aes(group=smoke_status),method='loess') +
@@ -761,6 +765,6 @@ ggplot(cb_ecel_betas_long,aes(x=cpg,y=beta,dot.size=0.03,color=smoke_status,fill
 
 dev.off()
 
-save(cb_ecel_betas_long,file=paste0(tsv_path,'output/ecel1p1_beta_long.rdata'))
+save(cb_ecel_betas_long,file='output/ecel1p1/ecel1p1_beta_long.rdata')
 
 

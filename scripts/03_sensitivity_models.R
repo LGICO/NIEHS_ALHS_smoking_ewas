@@ -1,6 +1,7 @@
 ### methylation & phenotype data
 library(dplyr)
-load('output/cleaned_MSA_niehs_alhs.rdata')
+load('751_clean_pc.rdata')
+dir.create("output/model_output/svyglm", recursive=TRUE, showWarnings=FALSE)
 beta2 = t(clean_betas) # methylation data
 betap <- t(clean_betas_pval_masked)
 pheno = clean_sampsheet# phenotype data
@@ -112,8 +113,8 @@ f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   mdl <- svyglm(formula = mdl.formula, design = dat)
   cf <- summary(mdl)
   N <- sum(!is.na(meth))
-  n.exp <- sum(!is.na(dat$y) & dat$LH_smoke_status == 2)
-  n.unexp <- sum(!is.na(dat$y) & dat$LH_smoke_status == 0)
+  n.exp <- sum(!is.na(dat$variables$y) & dat$variables$LH_smoke_status == 2)
+  n.unexp <- sum(!is.na(dat$variables$y) & dat$variables$LH_smoke_status == 0)
   coef = cf$coefficients[3,"Estimate"]
   se = cf$coefficients[3,"Std. Error"]
   p.value = cf$coefficients[3,"Pr(>|t|)"]
@@ -267,8 +268,8 @@ f.RLM.Adj.Robust.unwgt <- function(meth, dat1) {
   mdl <- svyglm(formula = mdl.formula, design = dat)
   cf <- summary(mdl)
   N <- sum(!is.na(meth))
-  n.exp <- sum(!is.na(dat$y) & dat$LH_smoke_status == 2)
-  n.unexp <- sum(!is.na(dat$y) & dat$LH_smoke_status == 0)
+  n.exp <- sum(!is.na(dat$variables$y) & dat$variables$LH_smoke_status == 2)
+  n.unexp <- sum(!is.na(dat$variables$y) & dat$variables$LH_smoke_status == 0)
   coef = cf$coefficients[3,"Estimate"]
   se = cf$coefficients[3,"Std. Error"]
   p.value = cf$coefficients[3,"Pr(>|t|)"]
@@ -518,7 +519,7 @@ write.csv(results, "output/model_output/svyglm/unweighted_formersmokers_women_EW
 results <- parApply(cl, betap_pc_women, 2, f.RLM.Adj.Robust.unwgt, pheno_pc_women)
 results <- as.data.frame(t(results))
 Nbeta <- sum(!is.na(results$P))
-write.csv(results, "unimputed_unweighted_formersmokers_women_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.csv")
+write.csv(results, "output/model_output/svyglm/unimputed_unweighted_formersmokers_women_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.csv")
 
 ##########
 ##Model 8 Iowa euro

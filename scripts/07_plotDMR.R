@@ -18,6 +18,8 @@ library(EnsDb.Hsapiens.v86)
 library(AnnotationHub)
 library(ChIPseeker)
 library(plyranges)
+
+dir.create("output/ecel1p1", recursive=TRUE, showWarnings=FALSE)
 #ahub <- AnnotationHub()
 #ahub["AH5086"]
 
@@ -27,15 +29,17 @@ bonf<- 0.05/230325
 bonf_epic = 0.05/817235
 #sesameDataCache()
 manifest = fread(tsv_path)
-load(paste0(path,'output/cleaned_MSA_niehs_alhs.rdata'))
+load('751_clean_pc.rdata')
+clean_betas <- betas_miss_masked
+clean_sampsheet <- pheno
 mani = fread(paste0(path,"references/MSA.hg38.manifest.gencode.v41.tsv.gz")) %>% dplyr::select(CpG_chrm, CpG_beg, CpG_end, probe_strand,probeID) %>%
-            dplyr::filter(probeID %in% rownames(clean_betas))
-smokers=fread(paste0(path,'output/svyglm/unimputed_unweighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv'))%>%
+  dplyr::filter(probeID %in% rownames(clean_betas))
+smokers=fread(paste0(path,'output/svyglm_anno/unimputed_unweighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv'))%>%
   dplyr::select(V1,CpG_chrm,CpG_beg,P,genesUniq)
 names(smokers)<- c("probeID","chr","pos","smokers_pvalue","gene")
 smokers <- smokers %>% dplyr::select(probeID,smokers_pvalue)
 
-formers=fread(paste0(path,'output/svyglm/unimputed_unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv'))%>%
+formers=fread(paste0(path,'output/svyglm_anno/unimputed_unweighted_formersmokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv'))%>%
   dplyr::select(V1,CpG_chrm,CpG_beg,P,genesUniq)
 names(formers)<- c("probeID","chr","pos","formers_pvalue","gene")
 formers <- formers %>% dplyr::select(probeID,formers_pvalue)
@@ -54,14 +58,14 @@ names(mani_gr)<-mani_gr$probeID
 rownames(cb) <- cb$probeID
 mcols(mani_gr)<-cb[names(mani_gr), ,on=.(probeID)]
 mani_cpg <- makeGRangesFromDataFrame(mani,keep.extra.columns = T,ignore.strand = F,
-                                    seqnames.field = "CpG_chrm",start.field = "CpG_beg",
-                                    end.field = "CpG_end",strand.field = "probe_strand",na.rm=T)
+                                     seqnames.field = "CpG_chrm",start.field = "CpG_beg",
+                                     end.field = "CpG_end",strand.field = "probe_strand",na.rm=T)
 names(mani_cpg)<-mani_cpg$probeID
 
-mani_ug = fread(paste0(path,"MSA.hg38.manifest.gencode.v41.tsv.gz")) %>% dplyr::select(CpG_chrm, CpG_beg, CpG_end, probe_strand,probeID,genesUniq)
+mani_ug = fread(paste0(path,"references/MSA.hg38.manifest.gencode.v41.tsv.gz")) %>% dplyr::select(CpG_chrm, CpG_beg, CpG_end, probe_strand,probeID,genesUniq)
 #chr2:232418299-232418301 --- chr2:232420896-232420898  ECEL1P1
 library(GenomicState)
-txdb <- gencode_txdb("47", "hg38", chrs = "chr2")
+txdb <- TxDb.Hsapiens.UCSC.hg38.refGene
 
 ecel.region<-toGRanges("2:232416025-232419910",genome = "hg38")
 ecel1p1 <- subsetByOverlaps(mani_gr, ecel.region)
@@ -74,8 +78,10 @@ ecel_probe<-c(
   "cg04284205_TC11", "cg06644428_BC13", "cg06644428_BC11",
   "cg06644428_BC12", "cg06644428_BC14", "cg04284171_TC11",
   "cg03329539_BC21", "cg04284170_TC11", "cg17087741_TC21",
-  "cg21566642_TC11", "cg21566642_TC12", "cg21566642_TC13"
+  "cg21566642_TC11", "cg21566642_TC12", "cg21566642_TC13",
+  "cg13193840_TC11"
 ) 
+
 ## We are going to collapse everything into CpGs from probeIDs
 cb_ecel <- cb %>% dplyr::filter(probeID %in% ecel_probe) %>% dplyr::mutate(probeID=gsub("\\_.*","",probeID)) %>% group_by(probeID) %>% summarise(across(everything(), list(mean)))
 rownames(cb_ecel) <- cb_ecel$probeID
@@ -91,13 +97,13 @@ mani_cpg<- annotatePeak(mani_cpg, tssRegion=c(-3000, 3000),
 ######
 ss<- clean_sampsheet %>% dplyr::select(Sample_ID,LH_smoke_status)
 mcpg <- manifest %>% dplyr::mutate(cpg=gsub("\\_.*","",Probe_ID)) %>% dplyr::select(-Probe_ID)%>%
-         dplyr::select(cpg,CpG_chrm,CpG_beg) %>% dplyr::distinct()
+  dplyr::select(cpg,CpG_chrm,CpG_beg) %>% dplyr::distinct()
 cb_ecel_pval <- cb_ecel %>% select(probeID,smokers_pvalue_1,formers_pvalue_1)
 cb_ecel_betas <- cb_ecel %>% select(-smokers_pvalue_1,-formers_pvalue_1)
 cb_ecel_betas_long <- cb_ecel_betas %>% tidyr::pivot_longer(cols=-probeID) %>%
-        dplyr::mutate(name = substr(name,1,nchar(name)-2)) %>%
-        dplyr::left_join(ss, by = c('name'='Sample_ID'))  %>% dplyr::filter(LH_smoke_status!="M") %>% 
-        dplyr::left_join(mcpg,by=c('probeID'='cpg')) %>% dplyr::group_by(probeID) %>% arrange(CpG_beg)
+  dplyr::mutate(name = substr(name,1,nchar(name)-2)) %>%
+  dplyr::left_join(ss, by = c('name'='Sample_ID'))  %>% dplyr::filter(LH_smoke_status!="M") %>% 
+  dplyr::left_join(mcpg,by=c('probeID'='cpg')) %>% dplyr::group_by(probeID) %>% arrange(CpG_beg)
 
 names(cb_ecel_betas_long) <- c('cpg','sample','beta','smoke_status','chr','start')
 cb_ecel_betas_long <- cb_ecel_betas_long %>% arrange(start)
@@ -119,7 +125,7 @@ status_order <- cb_ecel_betas_long %>%
   pull(smoke_status)
 
 cb_ecel_betas_long <- cb_ecel_betas_long %>%
-  mutate(smoke_status = factor(smoke_status, levels = status_order))
+  mutate(smoke_status = factor(smoke_status, levels = c('Never','Former','Current')))
 cb_ecel_betas_long <- cb_ecel_betas_long %>%
   arrange(smoke_status, cpg)
 
@@ -160,7 +166,7 @@ p<- ggplot() +
     method = "loess", size = 1.5, alpha=0.6
   ) +
   scale_fill_manual(values = custom.col) +
-  scale_color_manual(values = custom.col) + theme_classic() +
+  scale_color_manual(values = custom.col) + scale_x_discrete(expand = expansion(add = c(0.6, 1.5))) +theme_classic() +
   theme(
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
   ) + scale_color_manual(
@@ -172,44 +178,162 @@ p<- ggplot() +
     breaks = c("Never", "Former", "Current")
   )
 
-p
 
-pdf(paste0(path,"updated_dmr.pdf"), width = 10, height = 6)
+ggsave(
+  paste0(path,"output/ecel1p1/updated_dmr_mean.pdf"),
+  plot = p,
+  width = 11,
+  height = 7,
+  device = cairo_pdf
+)
 
-p
+
+
+save(cb_ecel_betas_long,file=paste0(path,'output/ecel1p1/ecel1p1_beta_long.rdata'))
+
+
+
+
+#######################################
+################################################################################
+## Median across MSA probe designs
+
+cb_ecel_median <- cb %>%
+  dplyr::filter(probeID %in% ecel_probe) %>%
+  dplyr::mutate(probeID=gsub("\\_.*", "", probeID)) %>%
+  group_by(probeID) %>%
+  summarise(
+    across(
+      everything(),
+      list(~median(.x, na.rm=TRUE))
+    )
+  )
+
+rownames(cb_ecel_median) <- cb_ecel_median$probeID
+
+cb_ecel_pval_median <- cb_ecel_median %>%
+  dplyr::select(probeID, smokers_pvalue_1, formers_pvalue_1)
+
+cb_ecel_betas_median <- cb_ecel_median %>%
+  dplyr::select(-smokers_pvalue_1, -formers_pvalue_1)
+
+cb_ecel_betas_long_median <- cb_ecel_betas_median %>%
+  tidyr::pivot_longer(cols=-probeID) %>%
+  dplyr::mutate(name=substr(name, 1, nchar(name)-2)) %>%
+  dplyr::left_join(ss, by=c("name"="Sample_ID")) %>%
+  dplyr::filter(LH_smoke_status != "M") %>%
+  dplyr::left_join(mcpg, by=c("probeID"="cpg")) %>%
+  dplyr::group_by(probeID) %>%
+  arrange(CpG_beg)
+
+names(cb_ecel_betas_long_median) <- c(
+  "cpg",
+  "sample",
+  "beta",
+  "smoke_status",
+  "chr",
+  "start"
+)
+
+cb_ecel_betas_long_median <- cb_ecel_betas_long_median %>%
+  arrange(start)
+
+cpg_order_median <- cb_ecel_betas_long_median %>%
+  distinct(cpg, start) %>%
+  arrange(start) %>%
+  pull(cpg)
+
+cb_ecel_betas_long_median <- cb_ecel_betas_long_median %>%
+  mutate(cpg=factor(cpg, levels=cpg_order_median))
+
+status_order_median <- cb_ecel_betas_long_median %>%
+  count(smoke_status) %>%
+  arrange(desc(n)) %>%
+  pull(smoke_status)
+
+cb_ecel_betas_long_median <- cb_ecel_betas_long_median %>%
+  mutate(smoke_status=factor(smoke_status, levels=c('Never','Former','Current'))) %>%
+  arrange(smoke_status, cpg)
+
+p_median <- ggplot() +
+  geom_dotplot(
+    data=filter(cb_ecel_betas_long_median, smoke_status == "Never"),
+    aes(x=cpg, y=beta, fill=smoke_status),
+    binwidth=0.006,
+    stackratio=0.5,
+    stackdir="center",
+    binaxis="y",
+    stroke=NA,
+    alpha=0.9
+  ) +
+  geom_dotplot(
+    data=filter(cb_ecel_betas_long_median, smoke_status == "Former"),
+    aes(x=cpg, y=beta, fill=smoke_status),
+    binwidth=0.006,
+    stackratio=0.5,
+    stackdir="center",
+    binaxis="y",
+    stroke=NA,
+    alpha=0.9
+  ) +
+  geom_dotplot(
+    data=filter(cb_ecel_betas_long_median, smoke_status == "Current"),
+    aes(x=cpg, y=beta, fill=smoke_status),
+    binwidth=0.006,
+    stackratio=0.5,
+    stackdir="center",
+    binaxis="y",
+    stroke=NA,
+    alpha=0.9
+  ) +
+  geom_smooth(
+    data=cb_ecel_betas_long_median,
+    aes(
+      x=cpg,
+      y=beta,
+      color=smoke_status,
+      group=smoke_status,
+      fill=smoke_status
+    ),
+    method="loess",
+    size=1.5,
+    alpha=0.6
+  ) +
+  scale_fill_manual(values=custom.col) +
+  scale_color_manual(values=custom.col) +
+  scale_x_discrete(expand=expansion(add=c(0.6, 1.5))) +
+  theme_classic() +
+  theme(
+    axis.text.x=element_text(angle=90, vjust=0.5, hjust=1)
+  ) +
+  scale_color_manual(
+    values=custom.col,
+    breaks=c("Never", "Former", "Current")
+  ) +
+  scale_fill_manual(
+    values=custom.col,
+    breaks=c("Never", "Former", "Current")
+  )
+
+p_median
+
+pdf(
+  paste0(path, "output/ecel1p1/updated_dmr_median.pdf"),
+  width=12.5,
+  height=7
+)
+
+print(p_median)
 
 dev.off()
 
-
-
-
-library(ggpubr)
-ggplot(cb_ecel_betas_long,aes(x=cpg,y=beta,dot.size=0.03,color=smoke_status,fill=smoke_status)) +
-        geom_dotplot(binwidth=0.006,stackratio =0.5, stackdir='center',position='identity',binaxis = "y",stroke=NA, alpha=0.9) +
-        geom_smooth(aes(group=smoke_status),method='loess') +
-        labs(x = "CpG", y = bquote(atop('Beta Value'))) + 
-        scale_fill_manual(values=custom.col,guide = "legend",name = "Smoking Status",aesthetics = c("colour", "fill"))+
-        theme_classic() + ggtitle("Methylation beta values across ECEL1P1 on the MSA",)
-
-
-
-ggplot(cb_ecel_betas_long,aes(x=cpg,y=beta,dot.size=0.03,color=smoke_status,fill=smoke_status)) +
-  ggviolin(binwidth=0.006,stackratio =0.1, stackdir='centerwhole',position='dodge',binaxis = "y",stroke=NA, alpha=0.5) +
-  geom_smooth(aes(group=smoke_status),method='loess') +
-  labs(x = "CpG", y = bquote(atop('Beta Value'))) + 
-  scale_color_discrete(guide = "legend",name = "Smoking Status",aesthetics = c("colour", "fill"))+
-  theme_classic() + ggtitle("Methylation beta values across ECEL1P1 on the MSA")
-
-
-
-save(cb_ecel_betas_long,file=paste0(path,'output/ecel1p1_beta_long.rdata'))
-
-
-
-
-
-
-
+ggsave(
+  paste0(path, "output/ecel1p1/updated_dmr_median.pdf"),
+  plot=p_median,
+  width=11,
+  height=7,
+  device=cairo_pdf
+)
 
 
 

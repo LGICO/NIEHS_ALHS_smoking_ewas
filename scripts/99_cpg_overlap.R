@@ -1,12 +1,13 @@
 tsv_path <- "references/MSA.hg38.manifest.tsv.gz"
 path = ""
+dir.create("output/merged_ewas_comparison", recursive=TRUE, showWarnings=FALSE)
 bonf<- 0.05/230325
 bonf_epic = 0.05/817235
 #sesameDataCache()
 manifest = fread(tsv_path)
-mani = fread(paste0(path,"MSA.hg38.manifest.gencode.v41.tsv.gz")) %>% 
+mani = fread(paste0(path,"references/MSA.hg38.manifest.gencode.v41.tsv.gz")) %>% 
   dplyr::select(probeID,genesUniq)
-mani_epic <- fread(file=paste0(path,"EPIC.hg38.manifest.gencode.v36.tsv.gz")) %>%
+mani_epic <- fread(file=paste0(path,"references/EPIC.hg38.manifest.gencode.v36.tsv.gz")) %>%
   dplyr::select(probeID,genesUniq) %>% mutate(CpG=gsub("\\_.*","",probeID)) %>% dplyr::select(CpG,genesUniq) %>% distinct()
 
 chrs<-c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8",
@@ -16,7 +17,7 @@ ma<-mani %>% filter(str_detect(genesUniq, regex("\\bAHRR", ignore_case = TRUE)))
 mae<-mani_epic %>% filter(str_detect(genesUniq, regex("\\bAHRR", ignore_case = TRUE)))
 api <- ma %>% filter(!probeID %in% mae$CpG) %>% select(probeID)
 
-lond_sig <- fread(paste0(path,"/output/EWAS_ALHS_EU_ALL_smok1vs3_e.cov11_817235x1619.csv.s"),sep = ",") 
+lond_sig <- fread(paste0(path,"output/EWAS_ALHS_EU_ALL_smok1vs3_e.cov11_817235x1619.csv.s"),sep = ",") 
 names(lond_sig)<-c("CpG","Beta","SE","P","N","N.exp","N.unexp")
 lond_sig <- left_join(lond_sig,mani_epic,by='CpG')
 lond_sig1 <- lond_sig %>% filter(pvalue<=bonf_epic)
@@ -24,7 +25,7 @@ x <- lond_sig %>% select("CpG", "Beta", "SE", "P", "N", "N.exp", "N.unexp", "CpG
                       "CpG_beg", "CpG_end", "probe_strand","genesUniq", 
                       "geneNames", "transcriptTypes", "transcriptIDs", "distToTSS")
 
-lond_sig <- fread(paste0(path,"/output/EWAS_ALHS_EU_ALL_smok1vs2_e.cov11_2190_2025-04-23.csv"),sep = ",") 
+lond_sig <- fread(paste0(path,"output/EWAS_ALHS_EU_ALL_smok1vs2_e.cov11_2190_2025-04-23.csv"),sep = ",") 
 names(lond_sig)<-c("CpG","Beta","SE","P","N","N.exp","N.unexp")
 lond_sig <- left_join(lond_sig,mani_epic,by='CpG')
 
@@ -98,7 +99,7 @@ model12 <- bind_rows(smoker = smokers, former_smoker = formers,.id="status") %>%
                 London_EWAS = case_when(CpG %in% lond_sig1$CpG ~ TRUE, .default = FALSE)) %>%
   arrange(pvalue)
 
-save(model1,model3,model10,model12,file = paste0(path,'output/sig_cpg_msa_epic_overlap.rdata'))
+save(model1,model3,model10,model12,file = paste0(path,'output/merged_ewas_comparison/sig_cpg_msa_epic_overlap.rdata'))
 
 
 

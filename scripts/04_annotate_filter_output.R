@@ -34,7 +34,10 @@ annotations = build_annotations(genome = 'hg38', annotations = annots)
 ################
 ## SVYGLM
 ###############
-fin<- system('ls output/model_output/svyglm/*.csv',intern=T)
+dir.create("output/model_output/svyglm_anno", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/model_output/svyglm_significant_cpgs", recursive=TRUE, showWarnings=FALSE)
+dir.create("output/boxplots", recursive=TRUE, showWarnings=FALSE)
+fin <- list.files("output/model_output/svyglm", pattern="\\.csv$", full.names=TRUE)
 bonf<- 0.05/230325 
 tsv_path <- "references/MSA.hg38.manifest.gencode.v41.tsv.gz"
 manifest = fread(tsv_path)
@@ -43,10 +46,10 @@ for(f in fin){
   uws <- fread(f)
   siguws <- uws %>% arrange(P)#%>% dplyr::filter(uws$P<=bonf)
   siguw_anno <- left_join(siguws,manifest,by=c("V1"="probeID"))
-  f <- substring(f,50) %>% substring(.,1,nchar(.)-4)
-  write.table(siguw_anno,file=paste0("output/model_output/svyglm_anno/",f,".tsv"),sep='\t',quote = F,na = "",row.names = F)
+  f <- tools::file_path_sans_ext(basename(f))
+  write.table(siguw_anno,file=file.path("output/model_output/svyglm_anno",paste0(f,".tsv")),sep='\t',quote = F,na = "",row.names = F)
 }     
-fin<- system('ls output/model_output/svyglm_anno/*.tsv',intern=T)
+fin <- list.files("output/model_output/svyglm_anno", pattern="\\.tsv$", full.names=TRUE)
 
 ## filter by sig
 for(f in fin){
@@ -54,8 +57,8 @@ for(f in fin){
   print(f)
   colnames(uws)<- c('Probe_ID','Beta','SE','P','N','N.exp','N.unexp','CpG_chrm','CpG_beg','CpG_end','probe_strand','genesUniq','geneNames','transcriptTypes','transcriptIDs','distToTSS')
   siguws <- uws %>% dplyr::filter(uws$P<=bonf) %>% arrange(P) 
-  f <- substring(f,61)
-  write.table(siguws,file=paste0("output/model_output/svyglm_significant_cpgs/",f),sep='\t',quote = F,na = "",row.names = F)
+  f <- basename(f)
+  write.table(siguws,file=file.path("output/model_output/svyglm_significant_cpgs",f),sep='\t',quote = F,na = "",row.names = F)
 }    
 
 
@@ -65,7 +68,7 @@ for(f in fin){
 siguws <- fread('output/model_output/svyglm_significant_cpgs/weighted_smokers_EWAS_Results_europc_only_smoke_gender_BMI_age_state_cells_pcs.tsv')
 siguws %>% arrange(P)
 probes<-siguws %>% arrange(P) %>% dplyr::select(V1)
-pdf("output/weighted_significant_smoking_probes_europc_only.pdf")
+pdf("output/boxplots/weighted_significant_smoking_probes_europc_only.pdf")
 for(p in as.list(probes$V1)){
   ahrr <- data.frame(beta_pc[,p])
   matching_rows <- grep(p, rownames(t(beta_pc)), value = TRUE)
@@ -96,7 +99,7 @@ dev.off()
 siguws <- fread('output/model_output/svyglm_significant_cpgs/weighted_smokers_EWAS_Results_transanc_smoke_gender_BMI_age_state_cells_pcs.tsv')
 siguws %>% arrange(P)
 probes<-siguws %>% arrange(P) %>% dplyr::select(V1)
-pdf("output/weighted_significant_smoking_probes_transancestry.pdf")
+pdf("output/boxplots/weighted_significant_smoking_probes_transancestry.pdf")
 for(p in as.list(probes$V1)){
   ahrr <- data.frame(beta2[,p])
   matching_rows <- grep(p, rownames(t(beta2)), value = TRUE)
